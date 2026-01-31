@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Status Dashboard</title>
+    <style>
+        :root {
+            --bg: #1a1a1b;
+            --card-bg: #2d2d2e;
+            --accent: #e01b24;
+            --accent-green: #00d4aa;
+            --text: #fff;
+            --text-muted: #888;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'IBM Plex Mono', monospace;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid var(--accent);
+        }
+        h1 { color: var(--accent); font-size: 1.5rem; }
+        .refresh-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .refresh-btn:hover { background: #ff3b3b; }
+        .refresh-btn:disabled { background: #444; cursor: wait; }
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1rem;
+        }
+        .agent-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 1.5rem;
+            border-left: 4px solid var(--accent);
+        }
+        .agent-card.online { border-left-color: var(--accent-green); }
+        .agent-name {
+            font-size: 1.25rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .agent-name a { color: var(--accent); text-decoration: none; }
+        .agent-name a:hover { text-decoration: underline; }
+        .agent-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            color: var(--text-muted);
+        }
+        .agent-stat .value { color: var(--text); }
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+        .status-dot.online { background: var(--accent-green); }
+        .status-dot.offline { background: var(--text-muted); }
+        .last-updated {
+            text-align: center;
+            color: var(--text-muted);
+            margin-top: 2rem;
+            font-size: 0.875rem;
+        }
+        .loading { text-align: center; padding: 2rem; }
+        .error { color: var(--accent); text-align: center; padding: 2rem; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Agent Status Dashboard</h1>
+        <button class="refresh-btn" onclick="refreshAll()">Refresh</button>
+    </div>
+    <div id="agents-container" class="agents-grid">
+        <div class="loading">Loading agents...</div>
+    </div>
+    <div id="last-updated" class="last-updated"></div>
+
+    <script>
+        const AGENTS = [
+            { name: 'darksheerio', github: 'Darksheer2017', human: 'Stefan' }
+        ];
+
+        const API_BASE = 'https://www.moltbook.com/api/v1';
+
+        async function fetchAgentData(agentName) {
+            try {
+                const response = await fetch(`${API_BASE}/agents/${agentName}`);
+                if (!response.ok) throw new Error('Not found');
+                return await response.json();
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function formatTimeAgo(dateString) {
+            if (!dateString) return 'Unknown';
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            return `${diffDays}d ago`;
+        }
+
+        function isOnline(lastActive) {
+            if (!lastActive) return false;
+            const diffMs = new Date() - new Date(lastActive);
+            return diffMs < 300000; // 5 minutes
+        }
+
+        function renderAgent(agent, data) {
+            const online = data && isOnline(data.last_active);
+            return `
+                <div class="agent-card ${online ? 'online' : ''}">
+                    <div class="agent-name">
+                        <span class="status-dot ${online ? 'online' : 'offline'}"></span>
+                        <a href="https://moltbook.com/u/${agent.name}" target="_blank">${agent.name}</a>
+                    </div>
+                    <div class="agent-stat">
+                        <span>Human:</span>
+                        <span class="value">${agent.human}</span>
+                    </div>
+                    <div class="agent-stat">
+                        <span>Karma:</span>
+                        <span class="value">${data?.karma ?? 'N/A'}</span>
+                    </div>
+                    <div class="agent-stat">
+                        <span>Last Active:</span>
+                        <span class="value">${formatTimeAgo(data?.last_active)}</span>
+                    </div>
+                    <div class="agent-stat">
+                        <span>GitHub:</span>
+                        <span class="value"><a href="https://github.com/${agent.github}" style="color: var(--accent-green);">@${agent.github}</a></span>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function refreshAll() {
+            const container = document.getElementById('agents-container');
+            const btn = document.querySelector('.refresh-btn');
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+
+            container.innerHTML = '<div class="loading">Fetching agent data...</div>';
+
+            const results = await Promise.all(
+                AGENTS.map(async agent => ({
+                    agent,
+                    data: await fetchAgentData(agent.name)
+                }))
+            );
+
+            container.innerHTML = results.map(r => renderAgent(r.agent, r.data)).join('');
+            document.getElementById('last-updated').textContent = `Last updated: ${new Date().toLocaleString()}`;
+
+            btn.disabled = false;
+            btn.textContent = 'Refresh';
+        }
+
+        // Initial load
+        refreshAll();
+
+        // Auto-refresh every 2 minutes
+        setInterval(refreshAll, 120000);
+    </script>
+</body>
+</html>
